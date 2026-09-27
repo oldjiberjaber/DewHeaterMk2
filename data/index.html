@@ -1,0 +1,1207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>DewHeater Mk2 | Observatory Controller</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔭</text></svg>">
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- Gauges & Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-gauges@2.1.7/gauge.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+
+  <!-- Leaflet.js for Interactive Location Picker -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Top Header Bar -->
+    <header class="header-bar">
+      <div class="brand-section">
+        <div class="brand-icon">🔭</div>
+        <div class="brand-text">
+          <h1>DewHeater <span class="badge-mk">Mk2</span></h1>
+          <p class="brand-sub">Autonomous AstroDew Controller</p>
+        </div>
+      </div>
+      
+      <div class="header-status-group">
+        <div class="status-pill" title="Outside Ambient Temperature">
+          <span class="pill-icon">🌡️</span>
+          <span class="pill-label">Out:</span>
+          <span id="hdr-out-temp" class="pill-val" style="color: #38bdf8; font-weight: 600;">--°C</span>
+        </div>
+        <div class="status-pill" title="Outside Dew Point">
+          <span class="pill-icon">💧</span>
+          <span class="pill-label">DP:</span>
+          <span id="hdr-dew-point" class="pill-val" style="color: #c084fc; font-weight: 600;">--°C</span>
+        </div>
+        <div class="status-pill" title="Weather Station Link">
+          <span id="wxs-online-status" class="dot-indicator"></span>
+          <span class="pill-label">Weather Station</span>
+        </div>
+        <div class="status-pill" title="WeeWX Data Stream">
+          <span id="weewx-valid-status" class="dot-indicator"></span>
+          <span class="pill-label">WeeWX Feed</span>
+        </div>
+        <a id="webserial-url" class="btn-serial" href="#" target="_blank" title="Open WebSerial Console">
+          <span class="icon">⚡</span> Console
+        </a>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button id="btn-tab-dashboard" class="tab-btn active" onclick="switchTab('dashboard')">
+        <span class="tab-icon">📊</span> Telemetry & Control
+      </button>
+      <button id="btn-tab-charts" class="tab-btn" onclick="switchTab('charts')">
+        <span class="tab-icon">📈</span> Thermal Charts
+      </button>
+      <button id="btn-tab-adaptive" class="tab-btn" onclick="switchTab('adaptive')">
+        <span class="tab-icon">🧠</span> Adaptive Engine
+      </button>
+      <button id="btn-tab-tuner" class="tab-btn" onclick="switchTab('tuner')">
+        <span class="tab-icon">🎛️</span> PID Tuner
+      </button>
+      <button id="btn-tab-settings" class="tab-btn" onclick="switchTab('settings')">
+        <span class="tab-icon">⚙️</span> Settings & Location
+      </button>
+    </nav>
+
+
+    <!-- System Info Bar -->
+    <div class="system-info-bar">
+      <div class="info-item">
+        <span class="info-lbl">Firmware:</span>
+        <span id="sw-version" class="info-val">Loading...</span>
+      </div>
+      <div class="info-item">
+        <span class="info-lbl">Built:</span>
+        <span id="compile-date" class="info-val">--</span> <span id="compile-time" class="info-val-sub"></span>
+      </div>
+      <div class="info-item">
+        <span class="info-lbl">WiFi Signal:</span>
+        <span id="wifi-rssi-display" class="info-val-highlight">-- dBm</span>
+        <span id="wifi-quality-badge" class="badge-status">--%</span>
+      </div>
+      <div class="info-item">
+        <span class="info-lbl">Sun Elevation:</span>
+        <span id="solar-elev-display" class="info-val-highlight">--°</span>
+        <span id="sun-status-badge" class="badge-day-night">Daylight</span>
+      </div>
+      <div class="info-item">
+        <span class="info-lbl">Screen Brightness:</span>
+        <span id="screen-bright-display" class="info-val-highlight">--</span><span class="info-val-sub"> / 255</span>
+      </div>
+    </div>
+
+
+    <!-- ==================== DASHBOARD TAB ==================== -->
+    <main id="tab-dashboard" class="tab-content active">
+      
+      <!-- Quick Environment Metrics Row -->
+      <section class="section-container">
+        <div class="section-header">
+          <h2>Ambient Environment</h2>
+          <span class="section-hint">Live atmospheric telemetry from weather station</span>
+        </div>
+        
+        <div class="grid-env">
+          <!-- Outside Temp Card -->
+          <div class="glass-card env-card">
+            <div class="card-top">
+              <span class="metric-icon">🌡️</span>
+              <span class="card-label">Outside Temp</span>
+            </div>
+            <div class="gauge-compact-wrap">
+              <canvas id="gauge-out-temp"></canvas>
+            </div>
+            <div class="metric-large"><span id="metric-out-temp">--</span><span class="unit">°C</span></div>
+          </div>
+
+          <!-- Humidity Card -->
+          <div class="glass-card env-card">
+            <div class="card-top">
+              <span class="metric-icon">💧</span>
+              <span class="card-label">Relative Humidity</span>
+            </div>
+            <div class="gauge-compact-wrap">
+              <canvas id="gauge-humidity"></canvas>
+            </div>
+            <div class="metric-large"><span id="metric-humidity">--</span><span class="unit">%</span></div>
+          </div>
+
+          <!-- Dew Point Card -->
+          <div class="glass-card env-card">
+            <div class="card-top">
+              <span class="metric-icon">🌫️</span>
+              <span class="card-label">Dew Point</span>
+            </div>
+            <div class="gauge-compact-wrap">
+              <canvas id="gauge-dew-point"></canvas>
+            </div>
+            <div class="metric-large"><span id="metric-dew-point">--</span><span class="unit">°C</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Scope Heaters Control Row -->
+      <section class="section-container">
+        <div class="section-header">
+          <h2>Telescope Heaters</h2>
+          <span class="section-hint">Dual-channel closed-loop PID dew prevention</span>
+        </div>
+
+        <div class="grid-scopes">
+          
+          <!-- Guide Scope Card (CH0) -->
+          <div class="glass-card scope-card scope-ch0">
+            <div class="scope-header">
+              <div class="scope-title-group">
+                <span class="scope-tag">CH 0</span>
+                <h3>Guide Scope</h3>
+              </div>
+              <div class="scope-header-actions">
+                <button id="btn-toggle-heater0" class="btn-heater-toggle active" onclick="toggleHeater(0)" title="Toggle Heater ON / Standby Cooldown">🔥 PID: ON</button>
+                <div class="scope-status-pill">
+                  <span class="pwr-val"><span id="metric-pwr1">0</span>%</span> Power
+                </div>
+              </div>
+            </div>
+
+            <div class="scope-body">
+              <div class="scope-gauges-row">
+                <div class="gauge-box">
+                  <span class="gauge-sublabel">Output Power</span>
+                  <canvas id="gauge-pwr1"></canvas>
+                </div>
+                <div class="gauge-box">
+                  <span class="gauge-sublabel">Optics Temp</span>
+                  <div class="gauge-side-flex">
+                    <canvas id="gauge-temp1"></canvas>
+                    <div class="gauge-delta-col">
+                      <span class="delta-col-title">Δ to Target</span>
+                      <span id="delta-target1" class="delta-col-value">--°C</span>
+                      <span id="delta-target1-status" class="delta-col-badge badge-below">--</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="scope-readings-strip">
+                <div class="stat-col">
+                  <span class="stat-title">Target Setpoint</span>
+                  <span class="stat-num"><span id="setpoint1-display">--</span>°C</span>
+                </div>
+                <div class="stat-col">
+                  <span class="stat-title">Active Offset</span>
+                  <span class="stat-num"><span id="current-offset1-display">--</span>°C</span>
+                </div>
+                <div class="stat-col">
+                  <span class="stat-title">Dew Margin</span>
+                  <span class="stat-num stat-margin" id="margin1-display">--°C</span>
+                </div>
+                <div class="stat-col">
+                  <span class="stat-title">Temp Trend</span>
+                  <span class="stat-num" id="ch0-rate-display" style="font-size:0.92rem;">--°C/m</span>
+                </div>
+              </div>
+
+              <!-- Controls -->
+              <div class="control-box">
+                <div class="slider-header">
+                  <label for="offset1-slider">Setpoint Offset:</label>
+                  <span class="slider-badge"><span id="offset1-slider-value">0.0</span>°C</span>
+                </div>
+                <input type="range" id="offset1-slider" min="-20" max="20" step="0.1" value="0" class="styled-slider">
+                
+                <div class="pwm-override-row">
+                  <span class="pwm-label">Manual PWM:</span>
+                  <div class="input-action-group">
+                    <input type="number" id="pwm1-input" min="0" max="100" placeholder="0" class="styled-input">
+                    <button class="btn-action" onclick="setPWM(1)">Set PWM</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Scope Card (CH1) -->
+          <div class="glass-card scope-card scope-ch1">
+            <div class="scope-header">
+              <div class="scope-title-group">
+                <span class="scope-tag">CH 1</span>
+                <h3>Main Imaging Scope</h3>
+              </div>
+              <div class="scope-header-actions">
+                <button id="btn-toggle-heater1" class="btn-heater-toggle active" onclick="toggleHeater(1)" title="Toggle Heater ON / Standby Cooldown">🔥 PID: ON</button>
+                <div class="scope-status-pill">
+                  <span class="pwr-val"><span id="metric-pwr2">0</span>%</span> Power
+                </div>
+              </div>
+            </div>
+
+            <div class="scope-body">
+              <div class="scope-gauges-row">
+                <div class="gauge-box">
+                  <span class="gauge-sublabel">Output Power</span>
+                  <canvas id="gauge-pwr2"></canvas>
+                </div>
+                <div class="gauge-box">
+                  <span class="gauge-sublabel">Optics Temp</span>
+                  <div class="gauge-side-flex">
+                    <canvas id="gauge-temp2"></canvas>
+                    <div class="gauge-delta-col">
+                      <span class="delta-col-title">Δ to Target</span>
+                      <span id="delta-target2" class="delta-col-value">--°C</span>
+                      <span id="delta-target2-status" class="delta-col-badge badge-below">--</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="scope-readings-strip">
+                <div class="stat-col">
+                  <span class="stat-title">Target Setpoint</span>
+                  <span class="stat-num"><span id="setpoint2-display">--</span>°C</span>
+                </div>
+                <div class="stat-col">
+                  <span class="stat-title">Active Offset</span>
+                  <span class="stat-num"><span id="current-offset2-display">--</span>°C</span>
+                </div>
+                <div class="stat-col">
+                  <span class="stat-title">Dew Margin</span>
+                  <span class="stat-num stat-margin" id="margin2-display">--°C</span>
+                </div>
+                <div class="stat-col">
+                  <span class="stat-title">Temp Trend</span>
+                  <span class="stat-num" id="ch1-rate-display" style="font-size:0.92rem;">--°C/m</span>
+                </div>
+              </div>
+
+              <!-- Controls -->
+              <div class="control-box">
+                <div class="slider-header">
+                  <label for="offset2-slider">Setpoint Offset:</label>
+                  <span class="slider-badge"><span id="offset2-slider-value">0.0</span>°C</span>
+                </div>
+                <input type="range" id="offset2-slider" min="-20" max="20" step="0.1" value="0" class="styled-slider">
+                
+                <div class="pwm-override-row">
+                  <span class="pwm-label">Manual PWM:</span>
+                  <div class="input-action-group">
+                    <input type="number" id="pwm2-input" min="0" max="100" placeholder="0" class="styled-input">
+                    <button class="btn-action" onclick="setPWM(2)">Set PWM</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ==================== CHARTS TAB ==================== -->
+    <section id="tab-charts" class="tab-content">
+      <div class="section-container">
+        <div class="section-header">
+          <h2>Thermal Tracking History</h2>
+          <span class="section-hint">Real-time optics temperature vs PID target setpoint</span>
+        </div>
+
+        <!-- ==================== GUIDE SCOPE (CH0) SECTION ==================== -->
+        <div class="charts-channel-group" style="margin-top: 14px;">
+          <div class="channel-group-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="metric-icon">🔭</span>
+              <h3 style="font-size: 1.05rem; color: #fff; margin: 0; font-weight: 600;">Guide Scope (CH0) Thermal Tracking & Stability</h3>
+            </div>
+            <span class="badge-status" style="background: rgba(0, 210, 255, 0.15); color: #38bdf8;">Channel 0</span>
+          </div>
+
+          <div class="charts-vertical-stack" style="display: flex; flex-direction: column; gap: 16px;">
+            <!-- 1. CH0 Temp & Power -->
+            <div class="glass-card chart-card">
+              <div class="card-top" style="justify-content: space-between; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="metric-icon">📈</span>
+                  <span class="card-label">CH0 Optics Temp (°C) & Heater Power (%)</span>
+                </div>
+                <span class="badge-status" style="background: rgba(245, 158, 11, 0.12); color: #f59e0b; font-size: 0.72rem;">1s Live Telemetry</span>
+              </div>
+              <div class="chart-wrapper" style="height: 240px;">
+                <canvas id="h0-chart"></canvas>
+              </div>
+            </div>
+
+            <!-- 2. CH0 Target Offset Error -->
+            <div class="glass-card chart-card">
+              <div class="card-top" style="justify-content: space-between; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="metric-icon">🎯</span>
+                  <span class="card-label">CH0 Target Offset Error (Over / Undershoot Δ°C)</span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <span class="badge-status" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; font-size: 0.72rem;">⏱️ 30s Interval (1hr History)</span>
+                  <span class="badge-status" style="background: rgba(52, 211, 153, 0.12); color: #34d399; font-size: 0.72rem;">0.0°C = Target Lock</span>
+                </div>
+              </div>
+              <div class="chart-wrapper" style="height: 240px;">
+                <canvas id="h0-error-chart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== MAIN SCOPE (CH1) SECTION ==================== -->
+        <div class="charts-channel-group" style="margin-top: 28px;">
+          <div class="channel-group-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="metric-icon">📷</span>
+              <h3 style="font-size: 1.05rem; color: #fff; margin: 0; font-weight: 600;">Main Scope (CH1) Thermal Tracking & Stability</h3>
+            </div>
+            <span class="badge-status" style="background: rgba(192, 132, 252, 0.15); color: #c084fc;">Channel 1</span>
+          </div>
+
+          <div class="charts-vertical-stack" style="display: flex; flex-direction: column; gap: 16px;">
+            <!-- 3. CH1 Temp & Power -->
+            <div class="glass-card chart-card">
+              <div class="card-top" style="justify-content: space-between; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="metric-icon">📈</span>
+                  <span class="card-label">CH1 Optics Temp (°C) & Heater Power (%)</span>
+                </div>
+                <span class="badge-status" style="background: rgba(245, 158, 11, 0.12); color: #f59e0b; font-size: 0.72rem;">1s Live Telemetry</span>
+              </div>
+              <div class="chart-wrapper" style="height: 240px;">
+                <canvas id="h1-chart"></canvas>
+              </div>
+            </div>
+
+            <!-- 4. CH1 Target Offset Error -->
+            <div class="glass-card chart-card">
+              <div class="card-top" style="justify-content: space-between; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="metric-icon">🎯</span>
+                  <span class="card-label">CH1 Target Offset Error (Over / Undershoot Δ°C)</span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <span class="badge-status" style="background: rgba(192, 132, 252, 0.12); color: #c084fc; font-size: 0.72rem;">⏱️ 30s Interval (1hr History)</span>
+                  <span class="badge-status" style="background: rgba(52, 211, 153, 0.12); color: #34d399; font-size: 0.72rem;">0.0°C = Target Lock</span>
+                </div>
+              </div>
+              <div class="chart-wrapper" style="height: 240px;">
+                <canvas id="h1-error-chart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== ADAPTIVE ENGINE TAB ==================== -->
+    <section id="tab-adaptive" class="tab-content" style="display:none;">
+      <div class="section-container">
+        <div class="section-header">
+          <h2>Adaptive Self-Learning Thermal Physics Engine</h2>
+          <span class="section-hint">Real-time identification of system dead time, ambient heat dissipation, and iterative trajectory convergence</span>
+        </div>
+
+        <!-- Live Model Physics & Diagnostic Cards -->
+        <div class="grid-scopes" style="margin-top: 14px;">
+          
+          <!-- Guide Scope (CH0) Adaptive Model Card -->
+          <div class="glass-card scope-card scope-ch0">
+            <div class="scope-header">
+              <div class="scope-title-group">
+                <span class="scope-tag">CH 0</span>
+                <h3>Guide Scope Learned Model</h3>
+              </div>
+              <div>
+                <span id="ch0-eng-state-badge" class="badge-status" style="font-size:0.8rem; padding:4px 10px;">⚪ Standby Tracking</span>
+              </div>
+            </div>
+
+            <div class="scope-body">
+              <div class="scope-readings-strip" style="grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 14px;">
+                <div class="stat-col" style="background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                  <span class="stat-title">Conductance (Kloss)</span>
+                  <span class="stat-num" style="color: #38bdf8; font-size: 1.25rem;"><span id="ch0-learned-kloss">12.0</span> <span style="font-size: 0.75rem; color: #94a3b8;">PWM/°C</span></span>
+                </div>
+                <div class="stat-col" style="background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                  <span class="stat-title">Predictive Lead Horizon</span>
+                  <span class="stat-num" style="color: #38bdf8; font-size: 1.25rem;"><span id="ch0-learned-lead">20.0</span> <span style="font-size: 0.75rem; color: #94a3b8;">sec</span></span>
+                </div>
+                <div class="stat-col" style="background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                  <span class="stat-title">Descent Adaptation Cycles</span>
+                  <span class="stat-num" style="color: #e2e8f0; font-size: 1.25rem;"><span id="ch0-learned-cycles">0</span> <span style="font-size: 0.75rem; color: #94a3b8;">cycles</span></span>
+                </div>
+                <div class="stat-col" style="background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                  <span class="stat-title">Last Peak Landing Error</span>
+                  <span class="stat-num" id="ch0-learned-lasterr-wrap" style="color: #34d399; font-size: 1.25rem;"><span id="ch0-learned-lasterr">0.00</span>°C</span>
+                </div>
+              </div>
+
+              <!-- Confidence Meter -->
+              <div style="margin-top: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.82rem; color: #94a3b8; font-weight: 500;">Model Convergence Confidence:</span>
+                  <span id="ch0-learned-conf" style="font-size: 0.85rem; font-weight: 700; color: #38bdf8;">50%</span>
+                </div>
+                <div style="height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden;">
+                  <div id="ch0-conf-bar" style="height: 100%; width: 50%; background: linear-gradient(90deg, #0284c7, #38bdf8); transition: width 0.5s ease;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Scope (CH1) Adaptive Model Card -->
+          <div class="glass-card scope-card scope-ch1">
+            <div class="scope-header">
+              <div class="scope-title-group">
+                <span class="scope-tag">CH 1</span>
+                <h3>Main Scope Learned Model</h3>
+              </div>
+              <div>
+                <span id="ch1-eng-state-badge" class="badge-status" style="font-size:0.8rem; padding:4px 10px;">⚪ Standby Tracking</span>
+              </div>
+            </div>
+
+            <div class="scope-body">
+              <div class="scope-readings-strip" style="grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 14px;">
+                <div class="stat-col" style="background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                  <span class="stat-title">Conductance (Kloss)</span>
+                  <span class="stat-num" style="color: #c084fc; font-size: 1.25rem;"><span id="ch1-learned-kloss">14.0</span> <span style="font-size: 0.75rem; color: #94a3b8;">PWM/°C</span></span>
+                </div>
+                <div class="stat-col" style="background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                  <span class="stat-title">Predictive Lead Horizon</span>
+                  <span class="stat-num" style="color: #c084fc; font-size: 1.25rem;"><span id="ch1-learned-lead">25.0</span> <span style="font-size: 0.75rem; color: #94a3b8;">sec</span></span>
+                </div>
+                <div class="stat-col" style="background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                  <span class="stat-title">Descent Adaptation Cycles</span>
+                  <span class="stat-num" style="color: #e2e8f0; font-size: 1.25rem;"><span id="ch1-learned-cycles">0</span> <span style="font-size: 0.75rem; color: #94a3b8;">cycles</span></span>
+                </div>
+                <div class="stat-col" style="background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                  <span class="stat-title">Last Peak Landing Error</span>
+                  <span class="stat-num" id="ch1-learned-lasterr-wrap" style="color: #34d399; font-size: 1.25rem;"><span id="ch1-learned-lasterr">0.00</span>°C</span>
+                </div>
+              </div>
+
+              <!-- Confidence Meter -->
+              <div style="margin-top: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.82rem; color: #94a3b8; font-weight: 500;">Model Convergence Confidence:</span>
+                  <span id="ch1-learned-conf" style="font-size: 0.85rem; font-weight: 700; color: #c084fc;">50%</span>
+                </div>
+                <div style="height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden;">
+                  <div id="ch1-conf-bar" style="height: 100%; width: 50%; background: linear-gradient(90deg, #9333ea, #c084fc); transition: width 0.5s ease;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Specialized Physics & Convergence Graphs -->
+        <div class="charts-vertical-stack" style="display: flex; flex-direction: column; gap: 16px; margin-top: 20px;">
+          
+          <!-- 1. Thermal Conductance Characteristic Curve -->
+          <div class="glass-card chart-card">
+            <div class="card-top" style="justify-content: space-between; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="metric-icon">📐</span>
+                <span class="card-label">Equilibrium Thermal Conductance & Heat Dissipation Model</span>
+              </div>
+              <span class="badge-status" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; font-size: 0.72rem;">PWM% vs Ambient ΔT (°C)</span>
+            </div>
+            <div class="chart-wrapper" style="height: 240px;">
+              <canvas id="chart-conductance"></canvas>
+            </div>
+          </div>
+
+          <!-- 2. Descent Landing Error Convergence History -->
+          <div class="glass-card chart-card">
+            <div class="card-top" style="justify-content: space-between; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="metric-icon">🎯</span>
+                <span class="card-label">Descent Landing Error Convergence History (ILC Cycles)</span>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <span class="badge-status" style="background: rgba(52, 211, 153, 0.12); color: #34d399; font-size: 0.72rem;">0.0°C = Perfect Soft-Landing</span>
+              </div>
+            </div>
+            <div class="chart-wrapper" style="height: 240px;">
+              <canvas id="chart-convergence"></canvas>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Educational / Architectural Guide Card -->
+        <div class="glass-card tuner-guide-card" style="margin-top: 20px;">
+          <div class="card-top">
+            <span class="metric-icon">💡</span>
+            <span class="card-label">How the Adaptive Self-Learning Thermal Engine Operates</span>
+          </div>
+          <div class="guide-content-grid">
+            <div class="guide-item">
+              <div class="guide-header">
+                <span class="guide-badge">Phase 1</span>
+                <h4>Steady-State Conductance (K<sub>loss</sub>)</h4>
+              </div>
+              <p>Whenever optics settle stably at target (&plusmn;0.35&deg;C), the engine measures the exact holding PWM power required per degree above ambient. This automatically accounts for changing wind speeds, shroud insulation, and ambient humidity without any manual calibration.</p>
+            </div>
+            <div class="guide-item">
+              <div class="guide-header">
+                <span class="guide-badge">Phase 2</span>
+                <h4>Descent Lead Anticipation (&tau;<sub>lead</sub>)</h4>
+              </div>
+              <p>Using Iterative Learning Control (ILC), the engine evaluates every cooling descent towards target. If the optics undershoot the setpoint, the lead horizon is lengthened to brake earlier; if descent is sluggish, lead is reduced to achieve perfect, critically damped arrival.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ==================== PID TUNER TAB ==================== -->
+    <section id="tab-tuner" class="tab-content">
+      <div class="section-container">
+        <div class="section-header">
+          <h2>Automated PID Parameter Identification (sTune)</h2>
+          <span class="section-hint">Step-response Inflection Point autotuner for optimal optics thermal control</span>
+        </div>
+
+        <div class="grid-tuner-layout">
+          <!-- Control & Config Card -->
+          <div class="glass-card tuner-ctrl-card">
+            <div class="card-top">
+              <span class="metric-icon">🚀</span>
+              <span class="card-label">Tuning Configuration</span>
+            </div>
+
+            <div class="tuner-form">
+              <div class="tuner-cooldown-box">
+                <div class="cooldown-header">
+                  <span class="cooldown-title">❄️ Optics Pre-Test Cooldown</span>
+                  <div class="cooldown-btn-group">
+                    <button type="button" class="btn-cooldown" onclick="setAllHeaters(false)">❄️ All Heaters OFF</button>
+                    <button type="button" class="btn-heat-on" onclick="setAllHeaters(true)">🔥 All Heaters ON</button>
+                  </div>
+                </div>
+                <div class="cooldown-status-row">
+                  <div class="cooldown-badge" id="cd-badge-ch0">
+                    CH0: <span id="cd-state-ch0" class="status-active">PID ON</span> (<span id="cd-temp-ch0">--°C</span>)
+                  </div>
+                  <div class="cooldown-badge" id="cd-badge-ch1">
+                    CH1: <span id="cd-state-ch1" class="status-active">PID ON</span> (<span id="cd-temp-ch1">--°C</span>)
+                  </div>
+                </div>
+                <p class="cooldown-hint">💡 <em>Tip: Turn heaters OFF to let optics settle to ambient before running auto-tuning for the cleanest step response.</em></p>
+              </div>
+
+              <div class="tuner-field-row">
+                <label for="tuner-target">Target Channel:</label>
+                <select id="tuner-target" class="styled-select" onchange="updateTunerChannel()">
+                  <option value="0">CH 0 - Guide Scope Heater</option>
+                  <option value="1">CH 1 - Main Imaging Scope Heater</option>
+                </select>
+              </div>
+
+              <div class="tuner-field-row">
+                <label for="tuner-step">Test Output Power (%):</label>
+                <div class="input-with-hint">
+                  <input type="number" id="tuner-step" min="10" max="100" value="80" step="1" class="styled-input" oninput="updateTunerPowerDisplay()">
+                  <span id="tuner-step-hint" class="hint-badge">80% (PWM 204/255)</span>
+                </div>
+              </div>
+
+              <div class="tuner-field-row">
+                <label for="tuner-duration">Test Duration (Sec):</label>
+                <div class="input-with-hint">
+                  <input type="number" id="tuner-duration" min="30" max="600" value="120" class="styled-input">
+                  <span class="hint-badge">Rec: 120s Guide (CH0) / 240s Main (CH1)</span>
+                </div>
+              </div>
+
+              <div class="tuner-field-row">
+                <label for="tuner-settle">Baseline Settle Time (Sec):</label>
+                <div class="input-with-hint">
+                  <input type="number" id="tuner-settle" min="5" max="120" value="20" class="styled-input">
+                  <span class="hint-badge">Rec: 20s</span>
+                </div>
+              </div>
+
+              <div class="tuner-field-row">
+                <label for="tuner-rule">Tuning Method / Rule:</label>
+                <select id="tuner-rule" class="styled-select">
+                  <option value="1">No Overshoot (NoOvershoot_PID) - Recommended for Astronomy</option>
+                  <option value="0">Ziegler-Nichols (ZN_PID) - Fast Response</option>
+                  <option value="2">Cohen-Coon (CohenCoon_PID) - For Long Dead Times</option>
+                  <option value="3">Damped Oscillation (DampedOsc_PID)</option>
+                </select>
+              </div>
+
+              <div class="tuner-actions">
+                <button id="btn-start-tune" class="btn-primary btn-tune-start" onclick="startTuner()">▶️ Start Auto-Tune</button>
+                <button id="btn-stop-tune" class="btn-danger btn-tune-stop" onclick="stopTuner()" disabled>⏹️ Abort Tuning</button>
+              </div>
+
+              <div class="tuner-status-panel">
+                <div class="tuner-status-header">
+                  <span class="lbl">Tuner Status:</span>
+                  <span id="tuner-state-badge" class="badge-status">IDLE</span>
+                </div>
+                <div class="progress-bar-wrap">
+                  <div id="tuner-progress-bar" class="progress-bar-fill" style="width: 0%;"></div>
+                </div>
+                <div class="tuner-progress-labels">
+                  <span id="tuner-time-label">0s / 0s</span>
+                  <span id="tuner-percent-label">0%</span>
+                </div>
+                <p id="tuner-msg-display" class="tuner-msg">Ready to start test.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Live Step-Response Graph Card -->
+          <div class="glass-card tuner-graph-card">
+            <div class="card-top">
+              <span class="metric-icon">📈</span>
+              <span class="card-label">Live Step-Response Curve (In-Memory)</span>
+            </div>
+            <div class="chart-wrapper">
+              <canvas id="tuner-chart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Calculated Results & Acceptance Card (Revealed upon Completion) -->
+        <div id="tuner-results-card" class="glass-card tuner-results-card" style="display: none; margin-top: 20px;">
+          <div class="card-top">
+            <span class="metric-icon">🎯</span>
+            <span class="card-label">Identified Parameters & Calculated PID Tunings</span>
+          </div>
+
+          <div class="results-grid">
+            <div class="result-metric-box">
+              <span class="r-lbl">Process Gain (K):</span>
+              <span id="res-gain" class="r-val">--</span>
+            </div>
+            <div class="result-metric-box">
+              <span class="r-lbl">Dead Time (L):</span>
+              <span id="res-deadtime" class="r-val">--s</span>
+            </div>
+            <div class="result-metric-box">
+              <span class="r-lbl">Time Constant (τ):</span>
+              <span id="res-tau" class="r-val">--s</span>
+            </div>
+          </div>
+
+          <div class="comparison-table-wrap">
+            <table class="tuning-table">
+              <thead>
+                <tr>
+                  <th>Parameter</th>
+                  <th>Current Active Setting</th>
+                  <th>Newly Calculated (sTune)</th>
+                  <th>Difference</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Proportional Gain (Kp)</strong></td>
+                  <td id="table-orig-kp">--</td>
+                  <td id="table-calc-kp" class="val-highlight">--</td>
+                  <td id="table-diff-kp">--</td>
+                </tr>
+                <tr>
+                  <td><strong>Integral Gain (Ki)</strong></td>
+                  <td id="table-orig-ki">--</td>
+                  <td id="table-calc-ki" class="val-highlight">--</td>
+                  <td id="table-diff-ki">--</td>
+                </tr>
+                <tr>
+                  <td><strong>Derivative Gain (Kd)</strong></td>
+                  <td id="table-orig-kd">--</td>
+                  <td id="table-calc-kd" class="val-highlight">--</td>
+                  <td id="table-diff-kd">--</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="result-decision-actions">
+            <button class="btn-primary btn-lg" onclick="applyTuningChoice(true)">💾 Accept & Save to Flash</button>
+            <button class="btn-secondary btn-lg" onclick="applyTuningChoice(false)">⚡ Apply to RAM Only</button>
+            <button class="btn-danger btn-lg" onclick="discardTuningChoice()">❌ Discard & Keep Original</button>
+          </div>
+          <div id="tuner-action-feedback" class="notification-msg"></div>
+        </div>
+
+        <!-- Guidance & Recommendations Card -->
+        <div class="glass-card tuner-guide-card" style="margin-top: 20px;">
+          <div class="card-top">
+            <span class="metric-icon">📘</span>
+            <span class="card-label">Auto-Tuning Guidance & Configuration Recommendations</span>
+          </div>
+
+          <div class="guide-content-grid">
+            <div class="guide-item">
+              <div class="guide-header">
+                <span class="guide-badge">Principle</span>
+                <h4>How sTune Auto-Tuning Works</h4>
+              </div>
+              <p>The controller executes an <strong>open-loop step-response test</strong> using inflection-point parameter identification. After baseline settling, it energizes the dew heater at a steady output power, logs temperature rate-of-rise, and measures process gain (<span class="mono">K</span>), thermal dead-time (<span class="mono">L</span>), and time constant (<span class="mono">&tau;</span>) to derive optimal PID constants.</p>
+            </div>
+
+            <div class="guide-item">
+              <div class="guide-header">
+                <span class="guide-badge">Recommended</span>
+                <h4>Setting Guidelines</h4>
+              </div>
+              <ul class="guide-list">
+                <li><strong>Test Power (%):</strong> <strong>40% – 60%</strong> (default 50%). Provides a distinct heating slope without thermal overshoot or excessive battery draw.</li>
+                <li><strong>Baseline Settle:</strong> <strong>10s – 20s</strong>. Lets DS18B20 sensor readings stabilize at ambient before heating begins.</li>
+                <li><strong>Test Duration:</strong> <strong>60s</strong> for Guide Scopes & finders; <strong>90s – 120s</strong> for larger refractors, reflectors, or SCT corrector plates.</li>
+              </ul>
+            </div>
+
+            <div class="guide-item">
+              <div class="guide-header">
+                <span class="guide-badge">Methods</span>
+                <h4>Tuning Rules Explained</h4>
+              </div>
+              <ul class="guide-list">
+                <li><strong>No Overshoot (Recommended):</strong> Smooth, critically damped approach without temperature oscillation. Best for astronomical imaging to prevent internal tube currents.</li>
+                <li><strong>Ziegler-Nichols (ZN):</strong> Rapid setpoint tracking with ~10-20% transient overshoot. Suitable for high wind or thick dew bands.</li>
+                <li><strong>Cohen-Coon:</strong> Ideal when the temperature probe has longer thermal transit lag from the heater wire.</li>
+                <li><strong>Damped Oscillation:</strong> Fast convergence with quarter-decay damping.</li>
+              </ul>
+            </div>
+
+            <div class="guide-item">
+              <div class="guide-header">
+                <span class="guide-badge">Procedure</span>
+                <h4>Best Practices & Safety</h4>
+              </div>
+              <ol class="guide-list-numbered">
+                <li>Tune when optics are cool and near ambient in a calm environment.</li>
+                <li>Select the target channel (CH0 or CH1) and click <strong>Start Auto-Tune</strong>.</li>
+                <li>Once complete, compare the calculated gains against your previous settings.</li>
+                <li>Click <strong>Accept & Save to Flash</strong> to permanently store values in non-volatile NVS flash.</li>
+                <li><strong>Built-in Safety:</strong> Automated shutoff engages if optics reach <strong>31.0°C</strong> or if <strong>Abort Tuning</strong> is clicked.</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ==================== SETTINGS & LOCATION TAB ==================== -->
+    <section id="tab-settings" class="tab-content">
+
+      <div class="section-container">
+        
+        <!-- Main Settings Grid -->
+        <div class="grid-settings">
+          
+          <!-- Default Setpoint Offsets Card -->
+          <div class="glass-card">
+            <div class="card-top">
+              <span class="metric-icon">🌡️</span>
+              <span class="card-label">Default Setpoint Offsets</span>
+            </div>
+            <p class="card-desc">
+              Configure default temperature offsets (°C) added above ambient Dew Point on startup (Target = Dew Point + Offset).
+            </p>
+
+            <div class="setting-row">
+              <div class="setting-text">
+                <strong>Heater 0 (Guide Scope) Offset</strong>
+                <p>Default target offset above dew point</p>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input type="number" id="def-offset0" min="0" max="30" step="0.5" class="styled-input pid-input-box" style="width:90px; text-align:center;">
+                <span style="color:#94a3b8; font-size:0.9rem; font-weight:600;">°C</span>
+              </div>
+            </div>
+
+            <div class="setting-row" style="margin-top: 10px;">
+              <div class="setting-text">
+                <strong>Heater 1 (Main Scope) Offset</strong>
+                <p>Default target offset above dew point</p>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input type="number" id="def-offset1" min="0" max="30" step="0.5" class="styled-input pid-input-box" style="width:90px; text-align:center;">
+                <span style="color:#94a3b8; font-size:0.9rem; font-weight:600;">°C</span>
+              </div>
+            </div>
+
+            <div class="coord-buttons" style="margin-top: 15px;">
+              <button class="btn-primary" onclick="saveDefaultOffsets()">💾 Save Defaults to Flash</button>
+            </div>
+            <div id="offset-save-msg" class="notification-msg"></div>
+          </div>
+
+          <!-- PID Tunings Card -->
+          <div class="glass-card">
+            <div class="card-top">
+              <span class="metric-icon">🎛️</span>
+              <span class="card-label">PID Tuning Parameters</span>
+            </div>
+            
+            <div class="pid-group">
+              <div class="pid-header-row">
+                <h4>Heater 0 (Guide Scope)</h4>
+                <button class="btn-action btn-sm" onclick="setPID(0)">💾 Save H0</button>
+              </div>
+              <div class="pid-inputs-grid">
+                <div class="pid-field">
+                  <label for="h0-kp">Kp (Prop)</label>
+                  <input type="number" id="h0-kp" step="0.001" class="styled-input pid-input-box" placeholder="25.000">
+                </div>
+                <div class="pid-field">
+                  <label for="h0-ki">Ki (Integ)</label>
+                  <input type="number" id="h0-ki" step="0.001" class="styled-input pid-input-box" placeholder="10.000">
+                </div>
+                <div class="pid-field">
+                  <label for="h0-kd">Kd (Deriv)</label>
+                  <input type="number" id="h0-kd" step="0.001" class="styled-input pid-input-box" placeholder="25.000">
+                </div>
+              </div>
+            </div>
+
+            <div class="pid-group" style="margin-top: 14px;">
+              <div class="pid-header-row">
+                <h4>Heater 1 (Main Scope)</h4>
+                <button class="btn-action btn-sm" onclick="setPID(1)">💾 Save H1</button>
+              </div>
+              <div class="pid-inputs-grid">
+                <div class="pid-field">
+                  <label for="h1-kp">Kp (Prop)</label>
+                  <input type="number" id="h1-kp" step="0.001" class="styled-input pid-input-box" placeholder="25.000">
+                </div>
+                <div class="pid-field">
+                  <label for="h1-ki">Ki (Integ)</label>
+                  <input type="number" id="h1-ki" step="0.001" class="styled-input pid-input-box" placeholder="4.000">
+                </div>
+                <div class="pid-field">
+                  <label for="h1-kd">Kd (Deriv)</label>
+                  <input type="number" id="h1-kd" step="0.001" class="styled-input pid-input-box" placeholder="10.000">
+                </div>
+              </div>
+            </div>
+            <div id="pid-save-msg" class="notification-msg"></div>
+          </div>
+
+          <!-- Thermal Soft-Landing Predictive Governor Card -->
+          <div class="glass-card">
+            <div class="card-top">
+              <span class="metric-icon">🛬</span>
+              <span class="card-label">Thermal Soft-Landing Governor</span>
+            </div>
+            <p class="card-desc">
+              Predictive anti-undershoot control: Pre-injects dynamic descent braking and heat-loss feedforward when optics temperature falls toward setpoint.
+            </p>
+
+            <div class="setting-row">
+              <div class="setting-text">
+                <strong>Soft-Landing Anticipation</strong>
+                <p>Enable predictive trajectory braking (Persists across reboot)</p>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="softland-toggle" onchange="toggleSoftLandingMaster()">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-text">
+                <strong>Governor Status</strong>
+                <p>CH0: <span id="ch0-softland-status" class="badge-status" style="font-size:0.75rem;">Standby</span> &nbsp;|&nbsp; CH1: <span id="ch1-softland-status" class="badge-status" style="font-size:0.75rem;">Standby</span></p>
+              </div>
+            </div>
+
+            <div class="setting-slider-box" style="margin-top: 10px;">
+              <div class="slider-header">
+                <label for="softland-agg0-slider">CH0 (Guide Scope) Aggressiveness:</label>
+                <div style="display:flex; gap:6px;">
+                  <span class="slider-badge" style="background: rgba(255,255,255,0.06); color:#94a3b8;" title="Active multiplier saved in controller">Active: <span id="softland-agg0-active">1.0</span>x</span>
+                  <span class="slider-badge" style="background: rgba(56, 189, 248, 0.15); color:#38bdf8;" title="Slider position to save">Set: <span id="softland-agg0-val">1.0</span>x</span>
+                </div>
+              </div>
+              <input type="range" id="softland-agg0-slider" min="0.2" max="3.0" step="0.1" value="1.0" class="styled-slider" oninput="onSoftlandAgg0Input(this.value)">
+            </div>
+
+            <div class="setting-slider-box">
+              <div class="slider-header">
+                <label for="softland-agg1-slider">CH1 (Main Scope) Aggressiveness:</label>
+                <div style="display:flex; gap:6px;">
+                  <span class="slider-badge" style="background: rgba(255,255,255,0.06); color:#94a3b8;" title="Active multiplier saved in controller">Active: <span id="softland-agg1-active">1.0</span>x</span>
+                  <span class="slider-badge" style="background: rgba(168, 85, 247, 0.15); color:#c084fc;" title="Slider position to save">Set: <span id="softland-agg1-val">1.0</span>x</span>
+                </div>
+              </div>
+              <input type="range" id="softland-agg1-slider" min="0.2" max="3.0" step="0.1" value="1.0" class="styled-slider" oninput="onSoftlandAgg1Input(this.value)">
+            </div>
+
+            <div class="coord-buttons" style="margin-top: 12px;">
+              <button class="btn-primary" onclick="saveSoftLandingConfig()">💾 Save Governor Settings to Flash</button>
+            </div>
+            <div id="softland-save-msg" class="notification-msg"></div>
+          </div>
+
+          <!-- Adaptive Self-Learning Thermal Engine Card -->
+          <div class="glass-card">
+            <div class="card-top">
+              <span class="metric-icon">🧠</span>
+              <span class="card-label">Adaptive Self-Learning Thermal Engine</span>
+            </div>
+            <p class="card-desc">
+              Continuous real-time system identification: Learns ambient heat dissipation (K<sub>loss</sub>) and optimizes predictive descent lead horizons over successive cooling cycles.
+            </p>
+
+            <div class="setting-row">
+              <div class="setting-text">
+                <strong>Continuous Learning Engine</strong>
+                <p>Auto-tune K<sub>loss</sub> and lead dead time (Persists across reboot)</p>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="learning-master-toggle" onchange="toggleLearningMaster()">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-row" style="margin-top: 10px;">
+              <div class="setting-text">
+                <strong>Adaptation Responsiveness</strong>
+                <p>Rate of parameter adjustment</p>
+              </div>
+              <select id="learning-speed-select" class="styled-select" style="width: auto; max-width: 170px;" onchange="saveLearningConfig()">
+                <option value="0">0: Conservative</option>
+                <option value="1" selected>1: Balanced</option>
+                <option value="2">2: Fast</option>
+              </select>
+            </div>
+
+            <div class="coord-buttons" style="margin-top: 15px; display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn-primary" onclick="saveLearningConfig()">💾 Save Learning Settings</button>
+              <button class="btn-danger" onclick="resetLearningModel()">🔄 Reset Learned Model</button>
+            </div>
+            <div id="learning-save-msg" class="notification-msg"></div>
+          </div>
+
+          <!-- WiFi & Network Connection Card -->
+          <div class="glass-card">
+            <div class="card-top">
+              <span class="metric-icon">📶</span>
+              <span class="card-label">WiFi & Network Connection</span>
+            </div>
+            <p class="card-desc">
+              Manage wireless network association. Scan available 2.4GHz WiFi networks, update credentials, or reset to Captive Portal setup mode.
+            </p>
+
+            <div class="setting-row">
+              <div class="setting-text">
+                <strong>Current Network</strong>
+                <p><span id="wifi-cur-ssid" style="color:#38bdf8; font-weight:600;">--</span> &nbsp;(<span id="wifi-cur-ip" style="font-family:var(--font-mono); color:#94a3b8;">--</span>)</p>
+              </div>
+              <div>
+                <span id="wifi-cur-status-badge" class="badge-status">Connected</span>
+              </div>
+            </div>
+
+            <div class="setting-row" style="margin-top: 10px;">
+              <div class="setting-text">
+                <strong>Scan Nearby Networks</strong>
+                <p>Detect 2.4GHz WiFi access points</p>
+              </div>
+              <button class="btn-action btn-sm" id="btn-scan-wifi" onclick="scanWifiNetworks()">🔍 Scan WiFi</button>
+            </div>
+
+            <div class="setting-row" style="margin-top: 10px;">
+              <div class="setting-text">
+                <strong>Detected Networks</strong>
+                <p>Select to auto-fill SSID</p>
+              </div>
+              <select id="wifi-detected-select" class="styled-select" style="width: auto; max-width: 200px;" onchange="onSelectDetectedWifi(this.value)">
+                <option value="">-- Click Scan WiFi --</option>
+              </select>
+            </div>
+
+            <div class="setting-row" style="margin-top: 10px;">
+              <div class="setting-text">
+                <strong>Network SSID</strong>
+                <p>Wireless network name</p>
+              </div>
+              <input type="text" id="wifi-cfg-ssid" placeholder="Network SSID" class="styled-input pid-input-box" style="width: 170px;">
+            </div>
+
+            <div class="setting-row" style="margin-top: 10px;">
+              <div class="setting-text">
+                <strong>Password</strong>
+                <p>WPA/WPA2 security key</p>
+              </div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <input type="password" id="wifi-cfg-pass" placeholder="••••••••" class="styled-input pid-input-box" style="width: 140px;">
+                <button type="button" class="btn-action btn-sm" onclick="togglePasswordVisibility('wifi-cfg-pass')" title="Show/Hide">👁️</button>
+              </div>
+            </div>
+
+            <div class="coord-buttons" style="margin-top: 15px; display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn-primary" onclick="saveAndConnectWifi()">💾 Save & Connect</button>
+              <button class="btn-danger" onclick="resetWifiToAP()">❄️ Reset to Setup AP</button>
+            </div>
+            <div id="wifi-save-msg" class="notification-msg"></div>
+          </div>
+
+          <!-- MQTT & LWT Automation Card -->
+          <div class="glass-card">
+            <div class="card-top">
+              <span class="metric-icon">📡</span>
+              <span class="card-label">MQTT Automation & LWT Broadcast</span>
+            </div>
+            <p class="card-desc">
+              Toggle the MQTT Last Will & Testament (LWT) status retained on topic <code style="color:#38bdf8; font-family:var(--font-mono);">tele/dewhtr/LWT</code> to test Home Assistant or Node-RED automations.
+            </p>
+
+            <div class="setting-row">
+              <div class="setting-text">
+                <strong>Current LWT State</strong>
+                <p>Broadcast status published to MQTT broker</p>
+              </div>
+              <div>
+                <span id="lwt-status-badge" class="badge-status" style="font-size:0.85rem; padding:4px 10px;">Online</span>
+              </div>
+            </div>
+
+            <div class="setting-row" style="margin-top: 10px;">
+              <div class="setting-text">
+                <strong>MQTT Topic</strong>
+                <p><span style="font-family:var(--font-mono); color:#94a3b8; font-size:0.8rem;">tele/dewhtr/LWT</span></p>
+              </div>
+              <div class="btn-group-toggle">
+                <button id="btn-lwt-toggle" class="btn-action btn-sm" onclick="toggleLWT()">📡 Toggle LWT</button>
+              </div>
+            </div>
+
+            <div id="lwt-action-msg" class="notification-msg"></div>
+          </div>
+
+          <!-- Screen Dimming Card -->
+          <div class="glass-card">
+            <div class="card-top">
+              <span class="metric-icon">☀️</span>
+              <span class="card-label">TFT Screen Auto-Dimming</span>
+            </div>
+            
+            <div class="setting-row">
+              <div class="setting-text">
+                <strong>Astronomical Dimming</strong>
+                <p>Dims screen at dusk/night to preserve dark vision</p>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="autodim-toggle" onchange="toggleAutoDim()">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-row">
+              <div class="setting-text">
+                <strong>Dimming Status</strong>
+                <span id="autodim-status-label" class="badge-status">Active</span>
+              </div>
+            </div>
+
+            <div class="setting-slider-box">
+              <div class="slider-header">
+                <label for="day-bright-slider">☀️ Daytime Brightness (Sun > +6°):</label>
+                <span class="slider-badge"><span id="day-bright-val">200</span> / 255</span>
+              </div>
+              <input type="range" id="day-bright-slider" min="5" max="255" step="1" value="200" class="styled-slider">
+            </div>
+
+            <div class="setting-slider-box">
+              <div class="slider-header">
+                <label for="night-bright-slider">🌙 Nighttime Brightness (Sun < -6°):</label>
+                <span class="slider-badge"><span id="night-bright-val">20</span> / 255</span>
+              </div>
+              <input type="range" id="night-bright-slider" min="0" max="255" step="1" value="20" class="styled-slider">
+            </div>
+
+            <div class="coord-buttons" style="margin-top: 10px;">
+              <button class="btn-primary" onclick="saveDimLevels()">💾 Save Dim Levels to Flash</button>
+            </div>
+            <div id="dim-save-msg" class="notification-msg"></div>
+
+            <div class="setting-slider-box" style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
+              <div class="slider-header">
+                <label for="brightness-slider">Manual Override Level:</label>
+                <span class="slider-badge"><span id="brightness-slider-value">--</span> / 255</span>
+              </div>
+              <input type="range" id="brightness-slider" min="0" max="255" step="1" value="20" class="styled-slider">
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Collapsible Observatory Location & Sun Calculations Card -->
+        <details class="glass-card collapsible-card settings-card" id="location-collapsible" ontoggle="handleLocationToggle(this)">
+          <summary class="collapsible-summary">
+            <div class="card-top" style="margin-bottom:0;">
+              <span class="metric-icon">📍</span>
+              <span class="card-label">Observatory Location & Sun Calculations</span>
+            </div>
+            <span class="collapsible-arrow">▼</span>
+          </summary>
+          <div class="collapsible-content">
+            <p class="card-desc">
+              Click on the map or drag the marker to set coordinates. Sun elevation angle and automatic screen dimming are computed using these coordinates and synced NTP time.
+            </p>
+            
+            <div id="location-map"></div>
+
+            <div class="coord-bar">
+              <div class="coord-field">
+                <label for="loc-lat">Latitude</label>
+                <input type="number" id="loc-lat" step="0.0001" placeholder="51.5074" class="styled-input pid-input-box" style="width:130px;">
+              </div>
+              <div class="coord-field">
+                <label for="loc-lon">Longitude</label>
+                <input type="number" id="loc-lon" step="0.0001" placeholder="-0.1278" class="styled-input pid-input-box" style="width:130px;">
+              </div>
+              <div class="coord-buttons">
+                <button class="btn-primary" onclick="saveLocation()">💾 Save to Flash</button>
+                <button class="btn-secondary" onclick="locateMe()">📍 Use GPS</button>
+              </div>
+            </div>
+            <div id="loc-save-msg" class="notification-msg"></div>
+          </div>
+        </details>
+
+      </div>
+    </section>
+
+    <!-- Footer Action -->
+    <footer class="footer-bar">
+      <p>DewHeater Mk2 FreeRTOS Controller &copy; 2026</p>
+      <button class="btn-danger" onclick="triggerReset()">🔄 Restart Controller</button>
+    </footer>
+
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

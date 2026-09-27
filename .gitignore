@@ -1,0 +1,9 @@
+.pio
+.vscode/
+*.code-workspace
+include/AAA_Credentials.h
+data - Copy
+data - Copy/
+*.tmp
+.DS_Store
+Thumbs.db
