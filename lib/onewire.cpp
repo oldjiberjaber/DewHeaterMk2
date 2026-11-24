@@ -122,7 +122,7 @@ void Poll_Sensors(void)
  {
    byte present = 0;
    byte data[12];
-   int raw;
+   int16_t raw;
    double temp;
 
    OW->reset();
